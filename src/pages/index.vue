@@ -1,5 +1,12 @@
 <script setup lang="ts">
-let signaling: BroadcastChannel | null
+import { io } from 'socket.io-client'
+
+const socket = io({
+  path: '/socket.io',
+})
+function postMessage(data: any) {
+  socket.emit('webrtc', data)
+}
 let pc: RTCPeerConnection | null
 let sendChannel: RTCDataChannel | null
 let receiveChannel: RTCDataChannel | null
@@ -71,7 +78,7 @@ function createPeerConnection() {
       message.data.sdpMid = e.candidate.sdpMid
       message.data.sdpMLineIndex = e.candidate.sdpMLineIndex
     }
-    signaling!.postMessage(message)
+    postMessage(message)
   }
 }
 
@@ -103,7 +110,7 @@ async function createConnection() {
 
   const offer = await pc.createOffer()
   // 主机发送信令
-  signaling?.postMessage({
+  postMessage({
     type: 'offer',
     sdp: offer.sdp,
   })
@@ -140,7 +147,7 @@ async function hangup() {
 };
 function closeDataChannels() {
   hangup()
-  signaling!.postMessage({ type: 'bye' })
+  postMessage({ type: 'bye' })
 }
 
 async function handleCandidate(candidate: CandidateMessage) {
@@ -168,7 +175,7 @@ async function handleOffer(offer: RTCSessionDescriptionInit) {
     await pc!.setRemoteDescription(offer)
     const answer = await pc!.createAnswer()
     // 将自己的信令发送给主机
-    signaling!.postMessage({ type: 'answer', sdp: answer.sdp })
+    postMessage({ type: 'answer', sdp: answer.sdp })
     await pc!.setLocalDescription(answer)
   }
 }
@@ -182,20 +189,19 @@ async function handleAnswer(answer: RTCSessionDescriptionInit) {
 }
 
 onMounted(() => {
-  signaling = new BroadcastChannel('webrtc')
-  signaling.onmessage = (e) => {
-    console.log(e)
-    switch (e.data.type) {
+  socket.on('webrtc', (data) => {
+    console.log(data)
+    switch (data.type) {
       // 第一个接收到信令
       case 'offer':
-        handleOffer(e.data)
+        handleOffer(data)
         break
       case 'answer':
-        handleAnswer(e.data)
+        handleAnswer(data)
         break
         // 第二个接收到信令
       case 'candidate':
-        handleCandidate(e.data)
+        handleCandidate(data)
         break
       case 'ready':
       // A second tab joined. This tab will enable the start button unless in a call already.
@@ -211,11 +217,44 @@ onMounted(() => {
         }
         break
       default:
-        console.log('unhandled', e)
+        console.log('unhandled', data)
         break
     }
-  }
-  signaling.postMessage({ type: 'ready' })
+  })
+  postMessage({ type: 'ready' })
+  // signaling.onmessage = (e) => {
+  //   console.log(e)
+  //   switch (e.data.type) {
+  //     // 第一个接收到信令
+  //     case 'offer':
+  //       handleOffer(e.data)
+  //       break
+  //     case 'answer':
+  //       handleAnswer(e.data)
+  //       break
+  //       // 第二个接收到信令
+  //     case 'candidate':
+  //       handleCandidate(e.data)
+  //       break
+  //     case 'ready':
+  //     // A second tab joined. This tab will enable the start button unless in a call already.
+  //       if (pc) {
+  //         console.log('already in call, ignoring')
+  //         return
+  //       }
+  //       startDisabled.value = false
+  //       break
+  //     case 'bye':
+  //       if (pc) {
+  //         hangup()
+  //       }
+  //       break
+  //     default:
+  //       console.log('unhandled', e)
+  //       break
+  //   }
+  // }
+  // signaling.postMessage({ type: 'ready' })
 })
 </script>
 

@@ -20,6 +20,8 @@
   "dependencies": {
     "@arco-design/web-vue": "2.54.3",
     "@vueuse/core": "^10.10.0",
+    "peerjs": "^1.5.4",
+    "socket.io-client": "^4.7.5",
     "vue": "^3.4.27",
     "vue-router": "^4.3.2"
   },

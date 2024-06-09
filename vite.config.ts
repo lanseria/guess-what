@@ -17,17 +17,13 @@ export default ({ mode }: ConfigEnv): UserConfig => {
     server: {
       host: env.VITE_HOST,
       port: +env.VITE_PORT,
-      // proxy: {
-      //   '^\/api\/': {
-      //     target: env.VITE_PROXY_URL,
-      //     changeOrigin: true,
-      //     xfwd: true,
-      //     rewrite: (path) => {
-      //       const replacePath = path.replace(/^\/api/, '')
-      //       return replacePath
-      //     },
-      //   },
-      // },
+      proxy: {
+        '^\/socket.io\/': {
+          target: env.VITE_WS_PROXY_URL,
+          ws: true,
+          rewrite: path => path.replace(/^\/socket.io/, ''),
+        },
+      },
     },
     resolve: {
       alias: {
