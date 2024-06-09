@@ -1,158 +1,222 @@
 <script setup lang="ts">
-let localConnection: RTCPeerConnection | null
-let remoteConnection: RTCPeerConnection | null
-let sendChannel: RTCDataChannel
-let receiveChannel: RTCDataChannel
-const startDisabled = ref(false)
+let signaling: BroadcastChannel | null
+let pc: RTCPeerConnection | null
+let sendChannel: RTCDataChannel | null
+let receiveChannel: RTCDataChannel | null
+const startDisabled = ref(true)
 // send
 const sendDisabled = ref(true)
 // stop
 const closeDisabled = ref(true)
 const sendTextData = ref('')
 const receiveTextData = ref('')
-/**
- * 获取对等连接对象的名称
- */
-function getName(pc: RTCPeerConnection) {
-  return (pc === localConnection) ? 'localPeerConnection' : 'remotePeerConnection'
-}
-
-function getOtherPc(pc: RTCPeerConnection) {
-  return (pc === localConnection) ? remoteConnection : localConnection
-}
-/**
- * 获取本地对等连接对象
- */
-function onAddIceCandidateSuccess() {
-  console.warn('AddIceCandidate success.')
-}
-/**
- * 获取本地对等连接对象
- */
-function onAddIceCandidateError(error: any) {
-  console.warn(`Failed to add Ice Candidate: ${error.toString()}`)
-}
-/**
- * 获取本地对等连接对象
- * @param pc
- * @param event
- */
-function onIceCandidate(pc: RTCPeerConnection, event: RTCPeerConnectionIceEvent) {
-  getOtherPc(pc)!
-    .addIceCandidate(event.candidate!)
-    .then(
-      onAddIceCandidateSuccess,
-      onAddIceCandidateError,
-    )
-  console.warn(`${getName(pc)} ICE candidate: ${event.candidate ? event.candidate.candidate : '(null)'}`)
-}
-
+//
 function onSendChannelStateChange() {
-  const readyState = sendChannel.readyState
-  console.warn(`Send channel state is: ${readyState}`)
+  const readyState = sendChannel!.readyState
+  console.log(`发送通道状态 is: ${readyState}`)
   if (readyState === 'open') {
     sendDisabled.value = false
-    // sendDocus()
+    closeDisabled.value = false
   }
   else {
     sendDisabled.value = true
+    closeDisabled.value = true
+  }
+}
+
+function onReceiveChannelStateChange() {
+  const readyState = receiveChannel!.readyState
+  console.log(`接收信息通道 状态 is: ${readyState}`)
+  if (readyState === 'open') {
+    sendDisabled.value = false
+    closeDisabled.value = false
+  }
+  else {
+    sendDisabled.value = true
+    closeDisabled.value = true
   }
 }
 
 function onReceiveMessageCallback(event: MessageEvent<any>) {
-  console.warn('Received Message')
+  console.log('从机接收到信息', event.data)
   receiveTextData.value = event.data
 }
 
-function onReceiveChannelStateChange() {
-  const readyState = receiveChannel.readyState
-  console.warn(`Receive channel state is: ${readyState}`)
-}
-
 function receiveChannelCallback(event: RTCDataChannelEvent) {
-  console.warn('Receive Channel Callback')
+  console.log('从机设置接收到信并设置回调函数')
   receiveChannel = event.channel
   receiveChannel.onmessage = onReceiveMessageCallback
   receiveChannel.onopen = onReceiveChannelStateChange
   receiveChannel.onclose = onReceiveChannelStateChange
 }
 
-function onCreateSessionDescriptionError(error: any) {
-  console.warn(`Failed to create session description: ${error.toString()}`)
+interface CandidateMessage {
+  type: string
+  data: RTCIceCandidateInit
 }
 
-function gotDescription2(desc: RTCSessionDescriptionInit) {
-  remoteConnection!.setLocalDescription(desc)
-  console.warn(`Answer from remoteConnection\n${desc.sdp}`)
-  localConnection!.setRemoteDescription(desc)
+function createPeerConnection() {
+  pc = new RTCPeerConnection()
+  pc.onicecandidate = (e) => {
+    const message: CandidateMessage = {
+      type: 'candidate',
+      data: {
+        candidate: '',
+        sdpMid: null as string | null,
+        sdpMLineIndex: null as number | null,
+      },
+    }
+    if (e.candidate) {
+      message.data.candidate = e.candidate.candidate
+      message.data.sdpMid = e.candidate.sdpMid
+      message.data.sdpMLineIndex = e.candidate.sdpMLineIndex
+    }
+    signaling!.postMessage(message)
+  }
 }
 
-function gotDescription1(desc: RTCSessionDescriptionInit) {
-  localConnection!.setLocalDescription(desc)
-  console.warn(`Offer from localConnection\n${desc.sdp}`)
-  remoteConnection!.setRemoteDescription(desc)
-  remoteConnection!.createAnswer().then(
-    gotDescription2,
-    onCreateSessionDescriptionError,
-  )
+function onSendChannelMessageCallback(event: any) {
+  console.log('主机接收到信息', event.data)
+  receiveTextData.value = event.data
 }
-
-function createConnection() {
+/**
+ * 创建主机
+ */
+async function createConnection() {
   const configuration = {
-    iceServers: [{
-      urls: 'stun:stun.miwifi.com',
-    },
+    iceServers: [
+      {
+        urls: 'stun:stun.miwifi.com',
+      },
     ],
   }
-  localConnection = new RTCPeerConnection(configuration)
-  console.warn('localConnection: 创建了本地对等连接对象localConnection')
+  pc = new RTCPeerConnection(configuration)
+  console.log('createConnection: 创建了本地对等连接对象pc')
 
-  sendChannel = localConnection.createDataChannel('sendDataChannel')
-  console.warn('sendChannel: 创建了发送数据通道')
-  localConnection.onicecandidate = (e) => {
-    onIceCandidate(localConnection!, e)
-  }
+  createPeerConnection()
+
+  sendChannel = pc.createDataChannel('sendDataChannel')
+  console.log('sendChannel: 创建了发送数据通道 [sendDataChannel]')
   sendChannel.onopen = onSendChannelStateChange
+  sendChannel.onmessage = onSendChannelMessageCallback
   sendChannel.onclose = onSendChannelStateChange
-  // remote
-  remoteConnection = new RTCPeerConnection(configuration)
-  console.warn('Created remote peer connection object remoteConnection')
 
-  remoteConnection.onicecandidate = (e) => {
-    onIceCandidate(remoteConnection!, e)
-  }
-  remoteConnection.ondatachannel = receiveChannelCallback
-
-  localConnection.createOffer().then(
-    gotDescription1,
-    onCreateSessionDescriptionError,
-  )
+  const offer = await pc.createOffer()
+  // 主机发送信令
+  signaling?.postMessage({
+    type: 'offer',
+    sdp: offer.sdp,
+  })
+  // 将本地对等连接对象 pc 的本地描述设置为刚创建的 offer。本地描述包含了本地对等连接的配置信息和媒体流信息。
+  await pc.setLocalDescription(offer)
   startDisabled.value = true
   closeDisabled.value = false
 }
 function sendData() {
   const data = sendTextData.value
-  sendChannel.send(data)
-  console.warn(`Sent Data: ${data}`)
+  // 主机
+  if (sendChannel) {
+    sendChannel.send(data)
+  }
+  else {
+    receiveChannel!.send(data)
+  }
+  console.log(`Sent Data: ${data}`)
 }
 
-function closeDataChannels() {
-  console.warn('Closing data channels')
-  sendChannel.close()
-  console.warn(`Closed data channel with label: ${sendChannel.label}`)
-  receiveChannel.close()
-  console.warn(`Closed data channel with label: ${receiveChannel.label}`)
-  localConnection?.close()
-  remoteConnection?.close()
-  localConnection = null
-  remoteConnection = null
-  console.warn('Closed peer connections')
+async function hangup() {
+  if (pc) {
+    pc.close()
+    pc = null
+  }
+  sendChannel = null
+  receiveChannel = null
+  console.log('Closed peer connections')
   startDisabled.value = false
   sendDisabled.value = true
   closeDisabled.value = true
   sendTextData.value = ''
   receiveTextData.value = ''
+};
+function closeDataChannels() {
+  hangup()
+  signaling!.postMessage({ type: 'bye' })
 }
+
+async function handleCandidate(candidate: CandidateMessage) {
+  console.log('handleCandidate')
+  if (!pc) {
+    console.error('无 对等连接')
+    return
+  }
+  if (!candidate.data.candidate) {
+    await pc.addIceCandidate(undefined)
+  }
+  else {
+    await pc.addIceCandidate(candidate.data)
+  }
+}
+
+// 收到主机信令
+async function handleOffer(offer: RTCSessionDescriptionInit) {
+  if (pc) {
+    console.error('对等链接已存在')
+  }
+  else {
+    await createPeerConnection()
+    pc!.ondatachannel = receiveChannelCallback
+    await pc!.setRemoteDescription(offer)
+    const answer = await pc!.createAnswer()
+    // 将自己的信令发送给主机
+    signaling!.postMessage({ type: 'answer', sdp: answer.sdp })
+    await pc!.setLocalDescription(answer)
+  }
+}
+
+async function handleAnswer(answer: RTCSessionDescriptionInit) {
+  if (!pc) {
+    console.error('对等链接不存在')
+    return
+  }
+  await pc.setRemoteDescription(answer)
+}
+
+onMounted(() => {
+  signaling = new BroadcastChannel('webrtc')
+  signaling.onmessage = (e) => {
+    console.log(e)
+    switch (e.data.type) {
+      // 第一个接收到信令
+      case 'offer':
+        handleOffer(e.data)
+        break
+      case 'answer':
+        handleAnswer(e.data)
+        break
+        // 第二个接收到信令
+      case 'candidate':
+        handleCandidate(e.data)
+        break
+      case 'ready':
+      // A second tab joined. This tab will enable the start button unless in a call already.
+        if (pc) {
+          console.log('already in call, ignoring')
+          return
+        }
+        startDisabled.value = false
+        break
+      case 'bye':
+        if (pc) {
+          hangup()
+        }
+        break
+      default:
+        console.log('unhandled', e)
+        break
+    }
+  }
+  signaling.postMessage({ type: 'ready' })
+})
 </script>
 
 <template>
